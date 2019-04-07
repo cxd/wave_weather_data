@@ -21,5 +21,39 @@ compile_model <- function(model, optimizer, loss, metrics) {
   )
 }
 
+partition_data <- function(data, trainPercent=0.6, validPercent=0.2, testPercent=0.2) {
+  
+  set.seed(42L)
+  n <- nrow(data)
+  
+  nTrain <- nrow(data)*trainPercent
+  idx <- sample(1:nrow(data), nTrain)
+  
+  inputX <- X[idx,]
+  testX <- X[-idx,]
+  
+  inputY <- Y[idx,]
+  testY <- Y[-idx,]
+  
+  nValid <- nrow(data)*validPercent
+  idx <- sample(1:nrow(inputX), nValid)
+  
+  trainX <- inputX[-idx,]
+  validX <- inputX[idx,]
+  trainY <- inputY[-idx,]
+  validY <- inputY[idx,]
+  
+  list(
+    trainX=trainX,
+    trainY=trainY,
+    validX=validX,
+    validY=validY,
+    testX=testX,
+    testY=testY
+  )
+}
+
+
+
 
 

@@ -60,3 +60,37 @@ meanAbsoluteError <- function(obs, sim) {
   mae <- 1/n * sum(delta)
 }
 
+assess_metrics <- function(obsData, simData, columnNames) {
+  obs <- obsData[,columnNames]
+  sim <- simData[,columnNames]
+  # there are 5 x length(columnNames) tests
+  results <- NA
+  for(i in 1:length(columnNames)) {
+    obs1 <- obs[,columnNames[i]]
+    sim1 <- sim[,columnNames[i]]
+    result <- data.frame(
+      attribute=rep(columnNames[i], 6),
+      metric=c("RSquared",
+               "Agreement",
+               "Efficiency",
+               "PercentPeakDeviation",
+               "RMSE",
+               "MAE"),
+      value=c(
+        rSquared(obs1, sim1),
+        agreement(obs1, sim1),
+        efficiency(obs1, sim1),
+        percentPeakDev(obs1, sim1),
+        rootMeanSquareError(obs1, sim1),
+        meanAbsoluteError(obs1, sim1)
+      )
+    )
+    if (is.na(results)) {
+      results <- result
+    } else {
+      results <- rbind(results, result)
+    }
+  }
+  results
+}
+

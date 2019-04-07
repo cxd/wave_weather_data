@@ -33,7 +33,7 @@ inputCols <- c("Evapotranspiration_mm",
                "MinRelativeHumidity_pc",
                "Avg10mWindSpeed_m_sec",
                "SolarRadiation_MJ_sqm")
-targetCols <- c("meanHs", "Hmax", "meanTz", "meanDirTp", "meanSST")
+targetCols <- c("meanHs", "Hmax", "meanTz", "meanTp", "meanDirTp", "meanSST")
 
 model <- model_dense(length(inputCols), 
                      length(targetCols), 
@@ -71,28 +71,82 @@ corrplot(C)
 X <- data[,inputCols]
 Y <- data[,targetCols]
 
+require(wavelets)
+w1 <- modwt(data$Hmax, filter="d4", n.levels=3)
+plot(w1)
 
-set.seed(42L)
+c1 <- w1@W$W1
+c2 <- w1@W$W2
+c3 <- w1@W$W3
+
+w2 <- modwt(data$meanHs, filter="d4", n.levels=3)
+plot(w2)
+
+c21 <- w2@W$W1
+c22 <- w2@W$W2
+c23 <- w2@W$W3
+
+## We will add coefficients for use as lagged covariates
+data$C1_Hmax <- c1
+data$C2_Hmax <- c2
+data$C3_Hmax <- c3
+data$C1_meanHs <- c21
+data$C2_meanHs <- c22
+data$C3_meanHs <- c23
+
+# Now we need to shift the coefficients up one timestep.
 n <- nrow(data)
-pcTrain <- 0.6
-pcValid <- 0.2
-pcTest <- 0.2
-nTrain <- nrow(data)*0.8
-idx <- sample(1:nrow(data), nTrain)
+n1 <- n-1
+data$C1_Hmax <- c(0,c1[1:n1])
+data$C2_Hmax <- c(0,c2[1:n1])
+data$C3_Hmax <- c(0,c3[1:n1])
+data$C1_meanHs <- c(0,c21[1:n1])
+data$C2_meanHs <- c(0,c22[1:n1])
+data$C3_meanHs <- c(0,c23[1:n1])
+# for the lagged series we discard the first row of data.
+data2 <- data[2:n,]
 
-inputX <- X[idx,]
-testX <- X[-idx,]
+# model2 will use the new lagged columns
 
-inputY <- Y[idx,]
-testY <- Y[-idx,]
+inputCols2 <- c("Evapotranspiration_mm",
+               "Rain_mm",
+               "PanEvaporation_mm",
+               "MaximumTemperature_C",
+               "MaxRelativeHumidity_pc",
+               "MinRelativeHumidity_pc",
+               "Avg10mWindSpeed_m_sec",
+               "SolarRadiation_MJ_sqm",
+               "C1_Hmax",
+               "C2_Hmax",
+               "C3_Hmax",
+               "C1_meanHs",
+               "C2_meanHs",
+               "C3_meanHs")
+targetCols2 <- c("meanHs", "Hmax", "meanTz", "meanTp", "meanDirTp", "meanSST")
 
-nValid <- nrow(data)*0.2
-idx <- sample(1:nrow(inputX), nValid)
+model2 <- model_dense(length(inputCols2), 
+                     length(targetCols2), 
+                     hiddenUnits=c(32), 
+                     hiddenActivation="relu", 
+                     outputActivation="linear") %>% 
+  compile_model("nadam", "mse", 
+                list(
+                  "mean_squared_error",
+                  "mean_absolute_error",
+                  "accuracy"
+                ))
 
-trainX <- inputX[-idx,]
-validX <- inputX[idx,]
-trainY <- inputY[-idx,]
-validY <- inputY[idx,]
+summary(model2)
+
+partitions1 <- partition_data(data)
+trainX <- partitions1$trainX
+trainY <- partitions1$trainY
+validX <- partitions1$validX
+validY <- partitions1$validY
+testX <- partitions1$testX
+testY <- partitions1$testY
+
+
 
 checkpoint_path <- "checkpoints/model1.h5"
 logdir <- "logs/model1"
@@ -154,116 +208,85 @@ par(par.old)
 summary(testY)
 summary(predictY)
 
-data.frame(
-  attribute=c("meanHs",
-              "Hmax",
-              "meanTz",
-              "meanDirTp",
-              "meanSST",
-             
-              "meanHs",
-              "Hmax",
-              "meanTz",
-              "meanDirTp",
-              "meanSST",
-              
-              "meanHs",
-              "Hmax",
-              "meanTz",
-              "meanDirTp",
-              "meanSST",
-              
-              "meanHs",
-              "Hmax",
-              "meanTz",
-              "meanDirTp",
-              "meanSST",
-              
-              "meanHs",
-              "Hmax",
-              "meanTz",
-              "meanDirTp",
-              "meanSST",
-              
-              "meanHs",
-              "Hmax",
-              "meanTz",
-              "meanDirTp",
-              "meanSST"
-              ),
-  metric=c("Rsquared",
-           "Rsquared",
-           "Rsquared",
-           "Rsquared",
-           "Rsquared",
-           
-           "Agreement",
-           "Agreement",
-           "Agreement",
-           "Agreement",
-           "Agreement",
-           
-           "Efficiency",
-           "Efficiency",
-           "Efficiency",
-           "Efficiency",
-           "Efficiency",
-           
-           "PercentPeakDeviation",
-           "PercentPeakDeviation",
-           "PercentPeakDeviation",
-           "PercentPeakDeviation",
-           "PercentPeakDeviation",
-           
-           "RMSE",
-           "RMSE",
-           "RMSE",
-           "RMSE",
-           "RMSE",
-           
-           "MAE",
-           "MAE",
-           "MAE",
-           "MAE",
-           "MAE"
-           ),
-  value=c(
-    rSquared(testY[idx,]$meanHs, predictY[idx,]$meanHs),
-    rSquared(testY[idx,]$Hmax, predictY[idx,]$Hmax),
-    rSquared(testY[idx,]$meanTz, predictY[idx,]$meanTz),
-    rSquared(testY[idx,]$meanDirTp, predictY[idx,]$meanDirTp),
-    rSquared(testY[idx,]$meanSST, predictY[idx,]$meanSST),
-    
-    agreement(testY[idx,]$meanHs, predictY[idx,]$meanHs),
-    agreement(testY[idx,]$Hmax, predictY[idx,]$Hmax),
-    agreement(testY[idx,]$meanTz, predictY[idx,]$meanTz),
-    agreement(testY[idx,]$meanDirTp, predictY[idx,]$meanDirTp),
-    agreement(testY[idx,]$meanSST, predictY[idx,]$meanSST),
-    
-    efficiency(testY[idx,]$meanHs, predictY[idx,]$meanHs),
-    efficiency(testY[idx,]$Hmax, predictY[idx,]$Hmax),
-    efficiency(testY[idx,]$meanTz, predictY[idx,]$meanTz),
-    efficiency(testY[idx,]$meanDirTp, predictY[idx,]$meanDirTp),
-    efficiency(testY[idx,]$meanSST, predictY[idx,]$meanSST),
-    
-    percentPeakDev(testY[idx,]$meanHs, predictY[idx,]$meanHs),
-    percentPeakDev(testY[idx,]$Hmax, predictY[idx,]$Hmax),
-    percentPeakDev(testY[idx,]$meanTz, predictY[idx,]$meanTz),
-    percentPeakDev(testY[idx,]$meanDirTp, predictY[idx,]$meanDirTp),
-    percentPeakDev(testY[idx,]$meanSST, predictY[idx,]$meanSST),
-    
-    rootMeanSquareError(testY[idx,]$meanHs, predictY[idx,]$meanHs),
-    rootMeanSquareError(testY[idx,]$Hmax, predictY[idx,]$Hmax),
-    rootMeanSquareError(testY[idx,]$meanTz, predictY[idx,]$meanTz),
-    rootMeanSquareError(testY[idx,]$meanDirTp, predictY[idx,]$meanDirTp),
-    rootMeanSquareError(testY[idx,]$meanSST, predictY[idx,]$meanSST),
-    
-    meanAbsoluteError(testY[idx,]$meanHs, predictY[idx,]$meanHs),
-    meanAbsoluteError(testY[idx,]$Hmax, predictY[idx,]$Hmax),
-    meanAbsoluteError(testY[idx,]$meanTz, predictY[idx,]$meanTz),
-    meanAbsoluteError(testY[idx,]$meanDirTp, predictY[idx,]$meanDirTp),
-    meanAbsoluteError(testY[idx,]$meanSST, predictY[idx,]$meanSST)
-  )
+metrics <- assess_metrics(testY, predictY, c("meanHs",
+                                             "Hmax",
+                                             "meanTz",
+                                             "meanTp",
+                                             "meanDirTp",
+                                             "meanSST"))
+metrics
+
+write.csv(metrics, "metrics_model1.csv", row.names=FALSE)
+
+
+partitions2 <- partition_data(data)
+trainX <- partitions2$trainX
+trainY <- partitions2$trainY
+validX <- partitions2$validX
+validY <- partitions2$validY
+testX <- partitions2$testX
+testY <- partitions2$testY
+
+
+
+checkpoint_path <- "checkpoints/model2.h5"
+logdir <- "logs/model2"
+
+callbacks <- list(
+  callback_model_checkpoint(checkpoint_path),
+  callback_tensorboard(logdir)
 )
 
+tensorboard("logs/model1")
 
+history <- model %>% fit(
+  as.matrix(trainX),
+  as.matrix(trainY),
+  epochs=500,
+  validation_data = list(as.matrix(validX), as.matrix(validY)),
+  callbacks = callbacks
+) 
+
+plot(history)
+
+results <- model %>% evaluate(as.matrix(testX), as.matrix(testY), verbose=1)
+results
+
+
+predictY <- model %>% predict(as.matrix(testX))
+
+predictY <- as.data.frame(predictY)
+names(predictY) <- colnames(testY)
+
+
+png("obs_vs_predict2.png", width=800, height=1024)
+par.old <- par(mfrow=c(5,1))
+
+plot(testY[idx,]$meanHs, col="blue", main="Mean Wave Height")
+points(predictY[idx,]$meanHs, col="red")
+
+plot(testY[idx,]$Hmax, col="blue", main="Maximum Wave Height")
+points(predictY[idx,]$Hmax, col="red")
+
+plot(testY[idx,]$meanTz, col="blue", main="Mean Zero Upcrossing Wave Period")
+points(predictY[idx,]$meanTz, col="red")
+
+plot(testY[idx,]$meanDirTp, col="blue", main="Mean Direction from true north")
+points(predictY[idx,]$meanDirTp, col="red")
+
+plot(testY[idx,]$meanSST, col="blue", main="Mean Sea Surface temperature")
+points(predictY[idx,]$meanSST, col="red")
+
+par(par.old)
+dev.off()
+
+
+metrics2 <- assess_metrics(testY, predictY, c("meanHs",
+                                             "Hmax",
+                                             "meanTz",
+                                             "meanTp",
+                                             "meanDirTp",
+                                             "meanSST"))
+metrics2
+
+write.csv(metrics2, "metrics_model2.csv", row.names=FALSE)
